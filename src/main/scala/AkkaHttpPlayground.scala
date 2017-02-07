@@ -9,13 +9,17 @@
  * file that was distributed with this source code.
  */
 
-import akka.actor.ActorSystem
+import akka.actor.{Actor, ActorSystem, Props}
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{ContentTypes, HttpEntity}
-import akka.http.scaladsl.server.Directives.{complete, get, pathSingleSlash}
+import akka.http.scaladsl.model.StatusCodes
+import akka.http.scaladsl.server.Directives._
+import akka.pattern.ask
 import akka.stream.ActorMaterializer
+import akka.util.Timeout
 
+import scala.concurrent.duration._
 import scala.io.StdIn
+import scala.util.Success
 
 /**
  * AkkaHttpPlayground
@@ -23,14 +27,43 @@ import scala.io.StdIn
  * @author Elliot Wright <hello@elliotdwright.com>
  */
 object AkkaHttpPlayground extends App {
+
   implicit val system = ActorSystem("AkkaHttpPlayground")
   implicit val executionContext = system.dispatcher
   implicit val materializer = ActorMaterializer()
 
+  object RequestHandler {
+
+    case object Handle
+
+    case class Result(data: String)
+
+  }
+
+  class RequestHandler extends Actor {
+
+    import RequestHandler._
+
+    def receive: Receive = {
+      case Handle =>
+        sender ! "ok"
+        context.stop(self)
+    }
+
+  }
+
   val route =
     pathSingleSlash {
       get {
-        complete(HttpEntity(ContentTypes.`text/html(UTF-8)`, "<p>Hello, World!</p>"))
+        // We need a timeout for the ask Q_Q
+        implicit val askTimeout: Timeout = 3.seconds
+        val actor = system.actorOf(Props[RequestHandler])
+        val response = actor ? RequestHandler.Handle
+
+        onComplete(response) {
+          case Success(result: String) => complete(result)
+          case _ => complete(StatusCodes.InternalServerError)
+        }
       }
     }
 
