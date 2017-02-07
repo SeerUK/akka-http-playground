@@ -9,15 +9,20 @@
  * file that was distributed with this source code.
  */
 
-import akka.actor.{ActorSystem, Props}
+import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.marshalling.ToResponseMarshallable
+import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.server.{RequestContext, Route, RouteResult}
+import akka.http.scaladsl.server.{Directive1, Route}
+import akka.pattern.ask
 import akka.stream.ActorMaterializer
+import akka.util.Timeout
 
-import scala.concurrent.Promise
+import scala.concurrent.Future
+import scala.concurrent.duration._
 import scala.io.StdIn
+import scala.reflect.ClassTag
+import scala.util.Success
 
 /**
  * AkkaHttpPlayground
@@ -26,37 +31,32 @@ import scala.io.StdIn
  */
 object AkkaHttpPlayground extends App {
 
-  final class ImperativeRequestContext(ctx: RequestContext, promise: Promise[RouteResult]) {
-    private implicit val ec = ctx.executionContext
-
-    def complete(obj: ToResponseMarshallable): Unit =
-      ctx.complete(obj).onComplete(promise.complete)
-
-    def fail(error: Throwable): Unit =
-      ctx.fail(error).onComplete(promise.complete)
-  }
-
-  def imperativelyComplete(inner: ImperativeRequestContext => Unit): Route = { ctx: RequestContext =>
-    val promise = Promise[RouteResult]()
-    inner(new ImperativeRequestContext(ctx, promise))
-    promise.future
-  }
-
   implicit val system = ActorSystem("AkkaHttpPlayground")
-  implicit val materializer = ActorMaterializer()
   implicit val executionContext = system.dispatcher
+  implicit val materializer = ActorMaterializer()
+  implicit val timeout: Timeout = 30.seconds
+
+  def withActor(props: Props): Directive1[ActorRef] = {
+    provide(system.actorOf(props))
+  }
+
+  def withActor[A <: Actor: ClassTag](message: Any)(f: Future[Any] => Route): Route =
+    f(system.actorOf(Props[A]) ? message)
 
   val route =
     pathSingleSlash {
       get {
-        imperativelyComplete { ctx =>
-          system.actorOf(Props[TestController]) ! TestController.Handle(ctx)
+        withActor[RequestHandler](RequestHandler.Handle) { future =>
+          onComplete(future) {
+            case Success(result: RequestHandler.Result) => complete(result.data)
+            case _ => complete(StatusCodes.InternalServerError)
+          }
         }
       }
     }
 
   val addr = "0.0.0.0"
-  val port = 8080
+  val port = 9000
   val bindingFuture = Http().bindAndHandle(route, addr, port)
 
   println(s"Server online at http://$addr:$port/\nPress RETURN to stop...")
@@ -66,4 +66,24 @@ object AkkaHttpPlayground extends App {
   bindingFuture
     .flatMap(_.unbind()) // Unbind the port
     .onComplete(_ => system.terminate()) // Shutdown actor system
+}
+
+object RequestHandler {
+
+  case object Handle
+
+  case class Result(data: String)
+
+}
+
+class RequestHandler extends Actor {
+
+  import RequestHandler._
+
+  def receive: Receive = {
+    case Handle =>
+      sender ! Result("Hello, World!")
+      context.stop(self)
+  }
+
 }

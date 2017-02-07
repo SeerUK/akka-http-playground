@@ -9,18 +9,17 @@
  * file that was distributed with this source code.
  */
 
-import akka.actor.Actor
-import akka.actor.Actor.Receive
+import akka.actor.{Actor, ActorLogging, ActorRef}
+import akka.http.scaladsl.server.RequestContext
 
 /**
- * TestController
+ * Controller
  *
  * @author Elliot Wright <hello@elliotdwright.com>
  */
-class TestController extends Actor {
+trait Controller extends Actor with ActorLogging {
 
-  override def receive: Receive = {
-    case _ =>
-  }
+  def ctx: RequestContext
+  def target: ActorRef
 
 }
