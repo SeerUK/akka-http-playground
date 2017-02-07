@@ -9,17 +9,15 @@
  * file that was distributed with this source code.
  */
 
-import akka.actor.{Actor, ActorSystem, Props}
+import akka.actor.{ActorSystem, Props}
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.StatusCodes
+import akka.http.scaladsl.marshalling.ToResponseMarshallable
 import akka.http.scaladsl.server.Directives._
-import akka.pattern.ask
+import akka.http.scaladsl.server.{RequestContext, Route, RouteResult}
 import akka.stream.ActorMaterializer
-import akka.util.Timeout
 
-import scala.concurrent.duration._
+import scala.concurrent.Promise
 import scala.io.StdIn
-import scala.util.Success
 
 /**
  * AkkaHttpPlayground
@@ -28,41 +26,31 @@ import scala.util.Success
  */
 object AkkaHttpPlayground extends App {
 
+  final class ImperativeRequestContext(ctx: RequestContext, promise: Promise[RouteResult]) {
+    private implicit val ec = ctx.executionContext
+
+    def complete(obj: ToResponseMarshallable): Unit =
+      ctx.complete(obj).onComplete(promise.complete)
+
+    def fail(error: Throwable): Unit =
+      ctx.fail(error).onComplete(promise.complete)
+  }
+
+  def imperativelyComplete(inner: ImperativeRequestContext => Unit): Route = { ctx: RequestContext =>
+    val promise = Promise[RouteResult]()
+    inner(new ImperativeRequestContext(ctx, promise))
+    promise.future
+  }
+
   implicit val system = ActorSystem("AkkaHttpPlayground")
-  implicit val executionContext = system.dispatcher
   implicit val materializer = ActorMaterializer()
-
-  object RequestHandler {
-
-    case object Handle
-
-    case class Result(data: String)
-
-  }
-
-  class RequestHandler extends Actor {
-
-    import RequestHandler._
-
-    def receive: Receive = {
-      case Handle =>
-        sender ! "ok"
-        context.stop(self)
-    }
-
-  }
+  implicit val executionContext = system.dispatcher
 
   val route =
     pathSingleSlash {
       get {
-        // We need a timeout for the ask Q_Q
-        implicit val askTimeout: Timeout = 3.seconds
-        val actor = system.actorOf(Props[RequestHandler])
-        val response = actor ? RequestHandler.Handle
-
-        onComplete(response) {
-          case Success(result: String) => complete(result)
-          case _ => complete(StatusCodes.InternalServerError)
+        imperativelyComplete { ctx =>
+          system.actorOf(Props[TestController]) ! TestController.Handle(ctx)
         }
       }
     }

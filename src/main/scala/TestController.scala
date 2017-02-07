@@ -9,8 +9,9 @@
  * file that was distributed with this source code.
  */
 
+import AkkaHttpPlayground.ImperativeRequestContext
+import TestController.Handle
 import akka.actor.Actor
-import akka.actor.Actor.Receive
 
 /**
  * TestController
@@ -20,7 +21,13 @@ import akka.actor.Actor.Receive
 class TestController extends Actor {
 
   override def receive: Receive = {
-    case _ =>
+    case Handle(ctx) =>
+      ctx.complete("Hello, from Actor")
+      context.stop(self)
   }
 
+}
+
+object TestController {
+  case class Handle(ctx: ImperativeRequestContext)
 }
