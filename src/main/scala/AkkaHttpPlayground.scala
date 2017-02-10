@@ -13,16 +13,15 @@ import akka.actor.{Actor, ActorRef, ActorSystem, Props}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.server.{Directive1, Route}
+import akka.http.scaladsl.server.Directive1
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
 
-import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.io.StdIn
 import scala.reflect.ClassTag
-import scala.util.Success
+import scala.util.{Success, Try}
 
 /**
  * AkkaHttpPlayground
@@ -36,24 +35,20 @@ object AkkaHttpPlayground extends App {
   implicit val materializer = ActorMaterializer()
   implicit val timeout: Timeout = 30.seconds
 
-  def withActor(props: Props): Directive1[ActorRef] = {
-    provide(system.actorOf(props))
-  }
+  def createActor[A <: Actor: ClassTag]: ActorRef =
+    system.actorOf(Props[A])
 
-  def withActor[A <: Actor: ClassTag](message: Any)(f: Future[Any] => Route): Route =
-    f(system.actorOf(Props[A]) ? message)
+  def askActor(ref: ActorRef, message: Any): Directive1[Try[Any]] =
+    onComplete(ref ? message)
 
-  val route =
+  val route = encodeResponse {
     pathSingleSlash {
-      get {
-        withActor[RequestHandler](RequestHandler.Handle) { future =>
-          onComplete(future) {
-            case Success(result: RequestHandler.Result) => complete(result.data)
-            case _ => complete(StatusCodes.InternalServerError)
-          }
-        }
+      (get & askActor(createActor[RequestHandler], RequestHandler.Handle)) {
+        case Success(result: RequestHandler.Result) => complete(result.data)
+        case _ => complete(StatusCodes.InternalServerError)
       }
     }
+  }
 
   val addr = "0.0.0.0"
   val port = 9000
