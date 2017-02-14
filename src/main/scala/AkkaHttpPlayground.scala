@@ -35,8 +35,8 @@ object AkkaHttpPlayground extends App {
   implicit val materializer = ActorMaterializer()
   implicit val timeout: Timeout = 30.seconds
 
-  def createActor[A <: Actor: ClassTag]: ActorRef =
-    system.actorOf(Props[A])
+  def createActor[A <: Actor: ClassTag](implicit as: ActorSystem): ActorRef =
+    as.actorOf(Props[A])
 
   def askActor(ref: ActorRef, message: Any): Directive1[Try[Any]] =
     onComplete(ref ? message)
